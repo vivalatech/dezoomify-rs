@@ -6,19 +6,18 @@ on:
     paths: [ 'src/**.rs', '.github/workflows/optimized-builds.yml' ]
     # Sequence of patterns matched against refs/tags
     tags: [ 'v*' ] # Push events to matching v*, i.e. v1.0, v20.15.10
+
 jobs:
   build:
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-20.04]
-        include:
-          - os: windows-latest
-            binary_path: target/release/dezoomify-rs.exe
-          - os: macos-latest
-            binary_path: target/release/dezoomify-rs
-          - os: ubuntu-20.04
-            binary_path: target/release/dezoomify-rs
+        target:
+          - armv7-unknown-linux-musleabihf
+          - i686-unknown-linux-musl
+          - aarch64-unknown-linux-musl
+          - x86_64-unknown-linux-musl
+          - arm-unknown-linux-musleabihf
     steps:
       - uses: actions/checkout@v3
       - uses: actions/cache@v3
@@ -27,12 +26,18 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - run: cargo build --release --locked
+          key: ${{ runner.os }}-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install cross
+        run: cargo install cross
+      - name: Add target
+        run: rustup target add ${{ matrix.target }}
+      - name: Build
+        run: cross build --release --target ${{ matrix.target }}
       - uses: actions/upload-artifact@v3
         with:
-          name: dezoomify-rs ${{ matrix.os }}
-          path: ${{ matrix.binary_path }}
+          name: dezoomify-rs-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/dezoomify-rs
+
   create_release:
     name: Create Release
     needs: build
@@ -41,8 +46,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
       - uses: actions/download-artifact@v3
-      - run: cd 'dezoomify-rs macos-latest' && chmod +x dezoomify-rs && tar --create --file dezoomify-rs-macos.tgz --gzip dezoomify-rs ../README-MACOS.txt
-      - run: cd 'dezoomify-rs ubuntu-20.04' && chmod +x dezoomify-rs && tar --create --file dezoomify-rs-linux.tgz --gzip dezoomify-rs
+      - name: Prepare release assets
+        run: |
+          for target in armv7-unknown-linux-musleabihf i686-unknown-linux-musl aarch64-unknown-linux-musl x86_64-unknown-linux-musl arm-unknown-linux-musleabihf; do
+            cd dezoomify-rs-$target
+            chmod +x dezoomify-rs
+            tar --create --file dezoomify-rs-$target.tgz --gzip dezoomify-rs
+            mv dezoomify-rs-$target.tgz ..
+            cd ..
+          done
       - name: Create Release
         id: create_release
         uses: softprops/action-gh-release@v1
@@ -52,6 +64,8 @@ jobs:
           draft: false
           prerelease: ${{ !startsWith(github.ref, 'refs/tags/v') }}
           files: |
-            dezoomify-rs windows-latest/dezoomify-rs.exe
-            dezoomify-rs ubuntu-20.04/dezoomify-rs-linux.tgz
-            dezoomify-rs macos-latest/dezoomify-rs-macos.tgz
+            dezoomify-rs-armv7-unknown-linux-musleabihf.tgz
+            dezoomify-rs-i686-unknown-linux-musl.tgz
+            dezoomify-rs-aarch64-unknown-linux-musl.tgz
+            dezoomify-rs-x86_64-unknown-linux-musl.tgz
+            dezoomify-rs-arm-unknown-linux-musleabihf.tgz
